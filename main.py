@@ -4,6 +4,12 @@ import RPi.GPIO as gpio
 from pirc522 import RFID
 from time import localtime, strftime
 
+### configuracion, inicializacion ###
+gpio.setmode(gpio.BOARD)  #para referirnos a los pines por su numero fisico
+rf = RFID(bus=0,device=0) #inicializar la libreria pirc522
+#rf2 = RFID(bus=1,device=0)
+rf.antenna_gain = 0x4     #ganancia de las antenas de los modulos, 33dB
+
 ### globales ###
 IRQ_PINS = [40, 38, 36, 37, 35, 33] #pines IRQ de de cada modulo
 MAPA     = {40:[1, "ENTRADA"], 38:[2, "SALIDA"], 36:[3, "AL NORTE"],\
@@ -24,7 +30,7 @@ class irq_debounce_obj:
 	muestrear = False
 	conteo = 0
 	arr = [-1]*M #guardar pines detectados
-	def ready(self): #regresar True si hubo suficientes detecciones
+	def ready(self):
 		if self.conteo>self.M:
 			self.conteo = 0
 			return True
@@ -37,13 +43,17 @@ class irq_debounce_obj:
 			self.arr.pop(0)
 			self.arr.append(val)
 			self.conteo += 1
-	def get_debounced(self): # regresar el pin con mas detecciones
+	def get_debounced(self):
 		if -1 in self.arr:
 			tmp = [x for x in self.arr if -1 not in x]
 			return mode(tmp)
 		return stat.mode(self.arr)
-	def reset(self): #reiniciar array
+	def reset(self):
 		self.arr = [-1]*self.M
+
+
+# inicializar debouncer para los pines IRQ
+debounce = irq_debounce_obj()
 
 
 #Conversion del ID de list a string hex
@@ -67,34 +77,28 @@ def setup_pins():
 		gpio.add_event_detect(pin, gpio.FALLING, callback=debounce.agg) # interrupt activo bajo en cada pin
 
 
-### solo para referencia
-#def test(rf, gpio):
-#	print("--test")
-#	(err, tpe) = rf.request()
-#	print("a")
-#	if not err:
-#		print("detectado " + format(tpe,"02x") + str(type(tpe)) )
-#		print("b")
-#		(err, uid) = rf.anticoll()
-#		if not err:
-#			print(str(uid) + str(type(uid)))
-#			if not rf.select_tag(uid):
-#				############
-#				if not rf.card_auth(rf.auth_a,10,[0xFF,0xFF,0xFF,0xFF,0xFF,0xFF], uid):
-#					data = rf.read(10)
-#					print("leyendo block 10: "+str(data) +str(type(data)))
-#					rf.stop_crypto()
-#	gpio.cleanup()
+def test(rf, gpio):
+	print("--test")
+	(err, tpe) = rf.request()
+	print("a")
+	if not err:
+		print("detectado " + format(tpe,"02x") + str(type(tpe)) )
+		print("b")
+		(err, uid) = rf.anticoll()
+		if not err:
+			print(str(uid) + str(type(uid)))
+			if not rf.select_tag(uid):
+				############
+				if not rf.card_auth(rf.auth_a,10,[0xFF,0xFF,0xFF,0xFF,0xFF,0xFF], uid):
+					data = rf.read(10)
+					print("leyendo block 10: "+str(data) +str(type(data)))
+					rf.stop_crypto()
+	gpio.cleanup()
 
 
 
-### configuracion, inicializacion ###
-gpio.setmode(gpio.BOARD)  #para referirnos a los pines por su numero fisico
+
 setup_pins()
-rf = RFID(bus=0,device=0) #inicializar la libreria pirc522
-#rf2 = RFID(bus=1,device=0)
-rf.antenna_gain = 0x4     #ganancia de las antenas de los modulos, 33dB
-debounce = irq_debounce_obj() # inicializar debouncer para los pines IRQ
 try:
 	while(1): #loop para detectar lecturas
 		debounce.reset()
