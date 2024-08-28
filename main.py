@@ -1,19 +1,29 @@
+import threading
 import statistics as stat
 from datetime import datetime
 import RPi.GPIO as gpio
 from pirc522 import RFID
-from flask import Flask
-from time import localtime, strftime
+from tinydb import TinyDB, Query
+from flask import Flask, Response, send_from_directory
+import flask_cors
+import json
+from time import time, localtime, strftime
+
 
 ### configuracion, inicializacion ###
 gpio.setmode(gpio.BOARD)  #para referirnos a los pines por su numero fisico
-rf = RFID(bus=0,device=0, speed=50000) #inicializar la libreria pirc522 con una velocidad de bus de 0.05MHz
-www = Flask(__name__) #servidor http, puerto 80 en todas la interfaces
-#rf2 = RFID(bus=1,device=0)
+rf = RFID(bus=0,device=0, speed=500000) #inicializar la libreria pirc522 con una velocidad de bus de 0.5MHz
 rf.antenna_gain = 0x04     #ganancia de las antenas de los modulos, 33dB
+db = TinyDB("base_datos.json") #inicializar DB
+dato = Query() #querys a la db
+www = Flask(__name__) #objeto servidor http
+flask_cors.CORS(www) #CORS
+
 
 ### globales ###
-BNK_PINS = [3,5]
+HOST = "0.0.0.0" #bindear en todas las interfaces
+PORT = 8001
+BNK_PINS = [3,5] #pines para controlar los CD4066
 IRQ_PINS = [40, 38, 36, 37, 35, 33] #pines IRQ de de cada modulo
 MAPA     = {40:[1, "ENTRADA"], 38:[2, "SALIDA"], 36:[3, "AL NORTE"],\
 	    35:[4, "AL SUR"] , 37:[5, "AL ESTE"],33:[6, "AL OESTE"]}
@@ -25,13 +35,6 @@ MAPA     = {40:[1, "ENTRADA"], 38:[2, "SALIDA"], 36:[3, "AL NORTE"],\
 # 37       5        al ESTE
 # 33       6        al OESTE
 DBG = False # debug con print :)
-
-
-@www.route("/")
-def www_index():
-	return "online"
-
-
 
 
 #objeto para procesar el debouncing de los pines IRQ
@@ -62,10 +65,10 @@ class irq_debounce_obj:
 		self.arr = [-1]*self.M
 
 
-class mux_obj:
+class demux_obj: #controlador demultiplexor
 	ff = 0
 	def __init__(self):
-		if DBG: print("mux init")
+		if DBG: print("demux init")
 	def strobe(self):
 		#desahabilitar todos
 		for pin in BNK_PINS:
@@ -82,7 +85,7 @@ class mux_obj:
 
 # inicializar debouncer para los pines IRQ
 debounce = irq_debounce_obj()
-muxer    = mux_obj()
+demuxer    = demux_obj()
 
 
 #Conversion del ID de list a string hex
@@ -108,14 +111,41 @@ def setup_pins():
 		gpio.setup(pin, gpio.OUT) #Modo salida
 
 
+#################### HTTP #########################
+def actualizar(t):
+	info = db.search(dato.tiempo > time()-t) #buscar todos los cambios de hace t seg
+	if info: #si hay resultados...
+		#yield "data: --INFORMACION--\n\n"
+		tmp = ""
+		for entry in info:
+			tmp = "event: update\ndata: "+json.dumps(entry) + "\n\n"
+			yield tmp #...enviarlos
+	else:
+		yield "data: --skip--\n\n"
+	#yield "data: --fin--\n\n"
+
+@www.route("/")
+def www_index():
+	#enviar index.html
+	return send_from_directory("html", "index.html")
+
+@www.route('/eventos')
+def www_event():
+	#responder eventos del navegador
+	return Response(actualizar(15), mimetype='text/event-stream')
+
+www_thread = threading.Thread(target=lambda: www.run(host=HOST, port=PORT, debug=DBG, use_reloader=DBG))
+www_thread.daemon = True
+############################################
+
 setup_pins()
-#www.run(host="0.0.0.0", port=5001)
 try:
+	www_thread.start() #iniciar servidor http
 	while(1): #loop para detectar lecturas
 		debounce.reset()
 		debounce.muestrear = True
 		while(not debounce.ready()):
-			muxer.switch_bank() #intercambiar entre bancos RDID
+			demuxer.switch_bank() #intercambiar entre bancos RDID
 			rf.wait_for_tag(timeout=0.1)
 		debounce.muestrear = False
 		(e, t) = rf.request() #iniciar comunicacion con RFID
@@ -123,7 +153,12 @@ try:
 			(e, uid) = rf.anticoll() #intentar obetner ID
 			if not e:
 				tiempo = localtime()
-				print(strftime("%H:%M:%S", tiempo),tag_id_str(uid), debounce.get_debounced())
+				uid__ = tag_id_str(uid)
+				dbnc = debounce.get_debounced()
+				print(strftime("%H:%M:%S", tiempo),uid__, dbnc)
+				db.update({"ubicacion": MAPA[dbnc][0], "tiempo":int(time())}, dato.id == uid__) #actualizar DB
+
 except KeyboardInterrupt:
-	if DBG: print("bye")
+	db.close() #guardar db
 	gpio_cleanup() #liberar pines
+	if DBG: print("bye")
