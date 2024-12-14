@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoreo de Objetos/Personas</title>
+    <style>
+        body,html {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            background-color: #e9e9e9;
+				font-size: 1.2em;
+        }
+        main{
+          display: grid;
+          height: 100%;
+         width: 100%;
+        }
+		  .container_edit{
+				position:fixed;
+				z-index:100;
+				width:100%;
+				padding:20px;
+				background-color:lawngreen;
+				bottom:0;
+				text-align: center;
+			}
+        #container{
+          position: absolute;
+          top: 5px;
+          right: 5px;
+          bottom: 5px;
+          left: 5px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; 
+          grid-template-rows: auto 1fr;
+          gap: 10px 10px;
+        }
+        #container .col{
+          border-radius: 7px;
+          padding: 7px;
+        }
+        #container .header{
+          width:100%;
+          font-size: 1.2em;
+          text-align: center;
+          padding-top: 5px;
+          padding-bottom: 5px;
+          background-color: red;
+          border-radius: 7px;
+          font-weight: bold;
+        }
+        .item{
+          width: 100%;
+          text-align: center;
+          padding-top:5px;
+          margin-bottom: 5px;
+          padding-bottom:5px;
+          background-color: aquamarine;
+          border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+	{% if edit == 1 %}
+	<div class="container_edit">
+		<form action="/edit" method="post">
+				<label for="obj">Mover el objeto</label>
+				<select name="obj" id="obj">
+					{%for obj in objetos%}
+					<option value="{{obj['id']}}">({{obj['id']}}){{obj["nombre"]}}</option>
+					{%endfor%}
+				</select>
+				<label for="pos">a la ubicacion</label>
+				<select name="pos" id="pos">
+					<option value="1">ENTRADA</option>
+					<option value="2">SALIDA</option>
+					<option value="3">NORTE</option>
+					<option value="4">SUR</option>
+					<option value="5">ESTE</option>
+					<option value="6">OESTE</option>
+				</select>
+			<input type="submit" value="CONFIRMAR">
+		</form>
+		</div>
+		{% endif %}
+  <div id="container">
+    <div class="header" style="background-color: #FFF5ED;">ENTRADA</div>
+    <div class="header" style="background-color: #FAE0D8;">SALIDA</div>
+    <div class="header" style="background-color: #F0F4BF;">NORTE</div>
+    <div class="header" style="background-color: #DFE1BE;">SUR</div>
+    <div class="header" style="background-color: #F1DEEE;">ESTE</div>
+    <div class="header" style="background-color: #C4B7BB;">OESTE</div>
+
+    <div class="col" id="c_1" style="background-color: #FFF5ED;"></div>
+    <div class="col" id="c_2" style="background-color: #FAE0D8;"></div>
+    <div class="col" id="c_3" style="background-color: #F0F4BF;"></div>
+    <div class="col" id="c_4" style="background-color: #DFE1BE;"></div>
+    <div class="col" id="c_5" style="background-color: #F1DEEE;"></div>
+    <div class="col" id="c_6" style="background-color: #C4B7BB;"></div>
+  </div>
+
+	
+	<script>
+		function conv_epoch(epoch){
+			t = new Date(0)
+			t.setUTCSeconds(epoch)
+			return t.toTimeString().split(" ")[0]
+		}
+      function borrar(id){
+			el = document.getElementById(id)
+			if(el==null){return}
+			el.remove()
+		}
+		function insertar(id, nombre, epoch, ubi){
+			borrar(id)
+			container = document.getElementById("c_" + ubi)
+			el = document.createElement("div")
+			el.setAttribute("id", id)
+			el.classList.add("item")
+			txt = document.createTextNode(nombre.replace("<br/>", "\n") + "\n" + conv_epoch(epoch))
+			el.appendChild(txt)
+			container.appendChild(el)
+		}
+		{% if edit == 0 %}
+		var errCount = 0
+		var conn = false
+		var source = new EventSource("/eventos")
+		source.onopen = (e) => (function(){
+		if(globalThis.conn==false){
+			globalThis.conn=true
+			globalThis.errCount=0
+			console.log("CONEXION ESTABLECIDA")
+			}
+		})()
+		source.onerror = (e) => (function(){
+			globalThis.errCount+=1
+			console.log(e)
+			if(globalThis.errCount>2){
+				globalThis.conn=false
+			}
+			if(globalThis.errCount>30){
+				source.close()
+				alert("SERVIDOR CAIDO. CONEXION CERRADA.")
+			}
+		})()
+		source.addEventListener("update", (e) => {
+			//console.log(e.data)
+			j=JSON.parse(e.data)
+			insertar(j.id, j.nombre, j.tiempo, j.ubicacion)
+		});
+		{% endif %}
+		{% if edit == 1 %}
+		data = {{data | safe}}
+		for(let i=0;i<data.length;i++){
+			insertar(data[i]["id"], data[i]["nombre"], data[i]["tiempo"], data[i]["ubicacion"])
+		}
+		{% endif %}
+	</script>
+	
+</body>
+</html>
